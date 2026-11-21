@@ -120,8 +120,12 @@ test('list mails without token returns 401', { timeout: 15_000 }, async () => {
 
 test('get mail 999999999 returns 404', { timeout: 15_000 }, async () => {
   // Create this test's own inbox so the 404 is checked in a realistic flow.
-  await createInbox(randomName('missing'));
-  const { res } = await fetchJson('/api/mail/999999999');
+  // v2 requires auth on /api/mail/:id (SEC-02): with a valid token, an
+  // unknown (or foreign) id returns 404; without a token it returns 401.
+  const inbox = await createInbox(randomName('missing'));
+  const { res } = await fetchJson('/api/mail/999999999', {
+    headers: { Authorization: `Bearer ${inbox.token}` },
+  });
   assert.equal(res.status, 404, `unknown mail id should return 404, got ${res.status}`);
 });
 
@@ -129,6 +133,7 @@ test('inboxes/:address/messages returns structure with count', { timeout: 15_000
   const inbox = await createInbox(randomName('inbox'));
   const { res, body } = await fetchJson(
     `/api/inboxes/${encodeURIComponent(inbox.address)}/messages`,
+    { headers: { Authorization: `Bearer ${inbox.token}` } },
   );
   assert.equal(res.status, 200);
   assert.ok(body, 'inbox messages should return JSON');

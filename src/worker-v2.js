@@ -207,7 +207,8 @@ export default {
       if (!address) return jsonNoStore({ error: "Unauthorized - provide token or address" }, 401);
       const since_id = Math.max(intParam(url, "since_id", 0), 0);
       const limit = Math.min(Math.max(intParam(url, "limit", 20), 1), 50);
-      const deadline = Date.now() + 25000;
+      const waitS = Math.min(Math.max(intParam(url, "timeout", 25), 1), 30);
+      const deadline = Date.now() + waitS * 1000;
       const pollMs = 1200;
       for (;;) {
         const { results } = await env.DB.prepare(
