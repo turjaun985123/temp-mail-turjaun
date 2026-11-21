@@ -76,15 +76,20 @@ jobs:
             echo "WASM parser artifact present:"
             ls -la rust/mail-parser/pkg
           else
-            echo "::warning::No WASM parser artifact was downloaded - deploying with the JS parser fallback in src/worker-v2.js."
+            echo "::warning::No WASM parser artifact was downloaded - deploying with the JS parser fallback in src/worker-final.js."
           fi
 
-      - name: Deploy the Worker with Wrangler
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
+      - name: Deploy the Worker via the Cloudflare API script
+        # scripts/deploy-api.py is the proven deploy path for this repo:
+        # it uploads src/worker-final.js with its bindings + cron schedule
+        # and health-gates on ok:true AND version=2. (wrangler-action was
+        # removed 2026-11-21: wrangler 3.90 calls /memberships, which the
+        # account-scoped cfat_ token cannot access — error 9106.)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python3 scripts/deploy-api.py
 
       - name: Smoke test production (/api/health and /api/config, with retry)
         shell: bash

@@ -152,7 +152,13 @@ def poll_health() -> bool:
     for attempt in range(1, HEALTH_ATTEMPTS + 1):
         try:
             req = urllib.request.Request(
-                HEALTH_URL, headers={"Cache-Control": "no-cache"}
+                HEALTH_URL,
+                headers={
+                    "Cache-Control": "no-cache",
+                    # Cloudflare's bot rules 403 the default Python-urllib
+                    # user-agent on workers.dev; identify honestly instead.
+                    "User-Agent": "temp-mail-deploy/2.0 (+https://github.com/turjaun985123/temp-mail-turjaun)",
+                },
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
