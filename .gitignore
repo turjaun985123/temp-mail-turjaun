@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Wrangler / Cloudflare local state
+.wrangler/
+
+# Local secrets — never commit (production secrets use `wrangler secret put`)
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+
+# Rust build artifacts (rust/mail-parser)
+target/
+rust/**/target/
+
+# Generated WASM / packaging output (wasm-pack)
+pkg/
+**/pkg/
+
+# Misc
+*.log
+.DS_Store
+
+# Python cache
+__pycache__/
+
+# D1 maintenance exports (contain inbox tokens — never commit)
+backups/

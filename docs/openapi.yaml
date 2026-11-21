@@ -1,0 +1,628 @@
+# Temp Mail API - OpenAPI 3.0.3
+# Standalone spec extracted and cleaned from docs/API.md
+# Live service: https://temp-mail.turjaun.workers.dev
+openapi: 3.0.3
+info:
+  title: Temp Mail API
+  description: 'Disposable email for turjaun.xyz. v1 endpoints are live at the base URL; items whose description starts with
+    [v2] are v2 additions (cursor pagination on /api/mails, /api/wait, ETag support, DELETE auth).
+
+    '
+  version: 2.0.0
+servers:
+- url: https://temp-mail.turjaun.workers.dev
+  description: Live service
+security:
+- {}
+paths:
+  /api/health:
+    get:
+      summary: Liveness check
+      security: []
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                ok: true
+                service: temp-mail
+                domain:
+                - turjaun.xyz
+                time: '2026-11-21T12:29:13.646Z'
+  /api/config:
+    get:
+      summary: Public configuration (domains + retention)
+      security: []
+      responses:
+        '200':
+          description: Configuration
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+              example:
+                domains:
+                - turjaun.xyz
+                ttl_hours: 24
+        '304':
+          $ref: '#/components/responses/NotModified'
+  /api/domains:
+    get:
+      summary: Alias of GET /api/config (identical body in v1)
+      security: []
+      responses:
+        '200':
+          description: Configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+  /api/new_address:
+    post:
+      summary: Create (or re-claim) a disposable inbox
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewAddressRequest'
+            examples:
+              random:
+                value:
+                  domain: turjaun.xyz
+              named:
+                value:
+                  name: test123
+                  domain: turjaun.xyz
+      responses:
+        '200':
+          description: Inbox created, or existing inbox returned (see `reused`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Inbox'
+              examples:
+                created:
+                  value:
+                    address: test123@turjaun.xyz
+                    token: 113f4f4ca0e917d9ecc662129d6f9b4f002da2e6aef18dc863c45bc8bcf25f62
+                    jwt: 113f4f4ca0e917d9ecc662129d6f9b4f002da2e6aef18dc863c45bc8bcf25f62
+                    expires_at: 1795350561
+                reused:
+                  value:
+                    address: test123@turjaun.xyz
+                    token: 113f4f4ca0e917d9ecc662129d6f9b4f002da2e6aef18dc863c45bc8bcf25f62
+                    reused: true
+        '400':
+          description: Invalid domain (or, [v2], invalid name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Invalid domain
+                allowed:
+                - turjaun.xyz
+  /api/mails:
+    get:
+      summary: List mails for the token's inbox (preview shape, newest first)
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          maximum: 50
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+        description: Offset pagination (v1). Must not be combined with a cursor parameter.
+      - name: since_id
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+        description: '[v2] Cursor — only mails with id > since_id.'
+      - name: before_id
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+        description: '[v2] Cursor — only mails with id < before_id.'
+      - name: token
+        in: query
+        schema:
+          type: string
+        description: Fallback auth instead of the Authorization header (discouraged).
+      - name: If-None-Match
+        in: header
+        schema:
+          type: string
+        description: '[v2] Conditional request — see Caching / ETag.'
+      responses:
+        '200':
+          description: One page of mail summaries
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailPreviewList'
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '400':
+          description: Offset combined with a cursor parameter [v2]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Cannot combine offset with cursor pagination
+        '401':
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Unauthorized
+  /api/inboxes/{address}/messages:
+    get:
+      summary: List full mails for an explicit address
+      security: []
+      parameters:
+      - name: address
+        in: path
+        required: true
+        schema:
+          type: string
+        example: test123@turjaun.xyz
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          maximum: 50
+      - name: If-None-Match
+        in: header
+        schema:
+          type: string
+        description: '[v2] Conditional request.'
+      responses:
+        '200':
+          description: Full messages, newest first (empty list for unknown addresses)
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailFullList'
+        '304':
+          $ref: '#/components/responses/NotModified'
+  /api/mail/{id}:
+    get:
+      summary: Fetch one mail in full, with otp
+      security: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: The mail
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailFull'
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '404':
+          description: No mail with that ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Not found
+    delete:
+      summary: Delete one mail permanently
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Deleted (v1 also returns this if the ID was already gone)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '401':
+          description: '[v2] Missing or invalid token'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Unauthorized
+  /api/wait:
+    get:
+      summary: '[v2] Long-poll — block until new mail arrives or the timeout elapses'
+      description: '[v2] Returns immediately if mail with id > since_id already exists, otherwise holds the request (server
+        default timeout 25 s, max 30 s) and returns as soon as the first new mail lands. A timeout is HTTP 200 with timeout:true
+        and empty results, not an error. One call is one wait cycle; never run parallel waits for one inbox.
+
+        '
+      security:
+      - bearerAuth: []
+      - {}
+      parameters:
+      - name: since_id
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+        description: Only mail with id > since_id counts as new. Default — latest ID at request start.
+      - name: address
+        in: query
+        schema:
+          type: string
+        description: Inbox to wait on. Required without a token; must match the token's inbox if both are given.
+      - name: token
+        in: query
+        schema:
+          type: string
+        description: Fallback auth instead of the Authorization header (discouraged).
+      - name: timeout
+        in: query
+        schema:
+          type: integer
+          default: 25
+          minimum: 1
+          maximum: 30
+        description: Seconds the server holds the request; larger values are clamped to 30.
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          maximum: 50
+      responses:
+        '200':
+          description: New mail arrived (timeout:false) or wait expired (timeout:true)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaitResponse'
+              examples:
+                arrived:
+                  value:
+                    address: test123@turjaun.xyz
+                    since_id: 41
+                    latest_id: 42
+                    timeout: false
+                    waited_ms: 6310
+                    count: 1
+                    results:
+                    - id: 42
+                      address: test123@turjaun.xyz
+                      sender: no-reply@service.example
+                      subject: Your verification code is 123456
+                      text_body: Your verification code is 123456. It expires in 10 minutes.
+                      html_body: <p>Your verification code is <b>123456</b>.</p>
+                      created_at: 1795348806
+                      otp: '123456'
+                timedOut:
+                  value:
+                    address: test123@turjaun.xyz
+                    since_id: 41
+                    latest_id: 41
+                    timeout: true
+                    waited_ms: 25004
+                    count: 0
+                    results: []
+        '400':
+          description: Neither address nor token, or an invalid parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing:
+                  value:
+                    error: Missing address or token
+                invalid:
+                  value:
+                    error: Invalid since_id
+        '401':
+          description: Invalid token, or address/token mismatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Unauthorized
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 'Per-inbox token returned by POST /api/new_address (64-char hex). The same value is also returned in the
+        `jwt` field on creation.
+
+        '
+  headers:
+    ETag:
+      description: '[v2] Weak validator for conditional requests (If-None-Match).'
+      schema:
+        type: string
+        example: W/"mails-test123@turjaun.xyz-42-2"
+  responses:
+    NotModified:
+      description: '[v2] If-None-Match matched — the client copy is current; body is empty.'
+  schemas:
+    Inbox:
+      type: object
+      properties:
+        address:
+          type: string
+          example: test123@turjaun.xyz
+        token:
+          type: string
+          description: 64-char hex per-inbox bearer token.
+        jwt:
+          type: string
+          description: Legacy alias of token. Absent on a reused response.
+        expires_at:
+          type: integer
+          description: Unix seconds. Absent on a reused response.
+        reused:
+          type: boolean
+          description: Present and true when an existing inbox was returned.
+      required:
+      - address
+      - token
+      description: A disposable inbox created (or re-claimed) by POST /api/new_address.
+    MailPreview:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 42
+        address:
+          type: string
+          example: test123@turjaun.xyz
+        sender:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        preview:
+          type: string
+          nullable: true
+          description: First 200 characters of text_body.
+        created_at:
+          type: integer
+          description: Unix seconds.
+      required:
+      - id
+      - address
+      - created_at
+    MailFull:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 42
+        address:
+          type: string
+          example: test123@turjaun.xyz
+        sender:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        text_body:
+          type: string
+          nullable: true
+        html_body:
+          type: string
+          nullable: true
+          description: Untrusted content — sanitise before rendering.
+        raw_size:
+          type: integer
+          description: Bytes of the raw inbound message. Present on GET /api/mail/:id; absent from list shapes.
+        created_at:
+          type: integer
+          description: Unix seconds.
+        otp:
+          type: string
+          nullable: true
+          description: First 4–8 digit sequence in text_body + subject
+          or null.: null
+      required:
+      - id
+      - address
+      - created_at
+      - otp
+    WaitResponse:
+      type: object
+      properties:
+        address:
+          type: string
+        since_id:
+          type: integer
+          description: Effective cursor used by the server.
+        latest_id:
+          type: integer
+          description: Feed back as the next since_id.
+        timeout:
+          type: boolean
+          description: true = wait expired with no new mail (still HTTP 200).
+        waited_ms:
+          type: integer
+        count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailFull'
+      required:
+      - address
+      - since_id
+      - latest_id
+      - timeout
+      - waited_ms
+      - count
+      - results
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        allowed:
+          type: array
+          items:
+            type: string
+          description: Present only on the Invalid domain error.
+        path:
+          type: string
+          description: Present only on the generic catch-all 404.
+      required:
+      - error
+    Health:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        service:
+          type: string
+          example: temp-mail
+        domain:
+          type: array
+          items:
+            type: string
+          example:
+          - turjaun.xyz
+        time:
+          type: string
+          format: date-time
+      required:
+      - ok
+      - service
+      - domain
+      - time
+    Config:
+      type: object
+      properties:
+        domains:
+          type: array
+          items:
+            type: string
+          example:
+          - turjaun.xyz
+        ttl_hours:
+          type: integer
+          example: 24
+      required:
+      - domains
+      - ttl_hours
+    NewAddressRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Desired local part; sanitised to a–z 0–9 . _ - and lower-cased. Random if omitted.
+        domain:
+          type: string
+          example: turjaun.xyz
+          description: Must be a configured domain; defaults to the first configured domain.
+    NewAddressResponse:
+      type: object
+      properties:
+        address:
+          type: string
+          example: test123@turjaun.xyz
+        token:
+          type: string
+          description: 64-char hex per-inbox bearer token.
+        jwt:
+          type: string
+          description: Legacy alias of token. Absent on a reused response.
+        expires_at:
+          type: integer
+          description: Unix seconds. Absent on a reused response.
+        reused:
+          type: boolean
+          description: Present and true when an existing inbox was returned.
+      required:
+      - address
+      - token
+    MailPreviewList:
+      type: object
+      properties:
+        address:
+          type: string
+        count:
+          type: integer
+          description: == results.length (page size, not a total).
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailPreview'
+        latest_id:
+          type: integer
+          nullable: true
+          description: '[v2] Largest ID in the page; null when empty.'
+        next_before_id:
+          type: integer
+          nullable: true
+          description: '[v2] Smallest ID in the page; pass as before_id for the next older page.'
+      required:
+      - address
+      - count
+      - results
+    MailFullList:
+      type: object
+      properties:
+        address:
+          type: string
+        count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailFull'
+      required:
+      - address
+      - count
+      - results

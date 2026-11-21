@@ -1,0 +1,161 @@
+-- ============================================================================
+-- Temp Mail v2 -- Migration: v1 database -> v2 database (in place)
+-- ============================================================================
+-- Upgrades an existing v1 D1 database (created from db-schema-v1.sql) to
+-- the v2 schema defined in db/schema-v2.sql, without recreating tables or
+-- copying data. Design contract: docs/ARCHITECTURE.md section 6, with the
+-- rollout/rollback rules of section 7.5.
+--
+-- Properties of this migration:
+--   * ADDITIVE ONLY. It adds two nullable columns and two indexes. It
+--     drops nothing, renames nothing, and rewrites no existing rows, so
+--     the v1 Worker can keep reading the database while/after it runs
+--     (a Worker rollback after migration is therefore safe).
+--   * IDEMPOTENT-ISH. The CREATE INDEX statements use IF NOT EXISTS and
+--     can be re-run freely. The ALTER TABLE ... ADD COLUMN statements
+--     cannot: SQLite (and D1) has no "ADD COLUMN IF NOT EXISTS", so
+--     re-running this file after a successful run fails on the first
+--     ALTER with a "duplicate column name" error and stops. That failure
+--     is harmless (nothing after it is destructive), but to re-apply
+--     cleanly, first check which columns already exist with:
+--         PRAGMA table_info(mails);
+--     and skip any ALTER whose column is already listed.
+--   * Run it against the remote database from the deploy workflow, e.g.:
+--         wrangler d1 execute temp-mail-db --remote \
+--           --file db/migrate-v1-to-v2.sql
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- Change 1: mails.preview -- store the list preview at ingest time
+-- ----------------------------------------------------------------------------
+-- v1 list reads derived the preview on the fly, and the inbox endpoint
+-- was worse: it selected the full text_body/html_body for every row and
+-- let the client truncate. v2 computes the first ~200 characters of the
+-- text body once, when the mail is ingested, and stores them here so
+-- list / delta / wait queries can select this small column only
+-- (ARCHITECTURE.md sections 1.3, 3.3, 6.3).
+--
+-- Nullable, no DEFAULT: existing v1 rows get NULL, which is meaningful --
+-- it marks "not computed at ingest" and triggers the COALESCE read
+-- fallback described under "Backfill" below. No mass UPDATE is run here.
+ALTER TABLE mails ADD COLUMN preview TEXT;
+
+-- ----------------------------------------------------------------------------
+-- Change 2: mails.otp -- store the extracted verification code
+-- ----------------------------------------------------------------------------
+-- v1 ran the /\b(\d{4,8})\b/ regex over the full body of every row on
+-- every list read. v2 extracts the code once at ingest (first match in
+-- subject+text, by the Rust WASM parser or the JS fallback) and stores
+-- it here, so reads just select the column (sections 1.3, 6.3).
+--
+-- Nullable: NULL means "no code found in this mail". For pre-v2 rows it
+-- also means "never extracted" -- the two cases are indistinguishable,
+-- which is acceptable because OTP clients already fall back to scanning
+-- subject/body when otp is null (AGENTS.md workflow, Step 5).
+ALTER TABLE mails ADD COLUMN otp TEXT;
+
+-- ----------------------------------------------------------------------------
+-- Change 3: idx_mails_address_id -- composite index for every hot read
+-- ----------------------------------------------------------------------------
+-- All v2 read shapes are:
+--     WHERE address = ? [AND id > ? (delta/wait) / id < ? (pagination)]
+--     ORDER BY id [DESC]
+-- v1's idx_mails_address(address) found the rows but left SQLite to sort
+-- by id. (address, id DESC) serves filter and sort from one index, so
+-- the list path never selects text_body/html_body and needs no temp
+-- B-tree for ORDER BY (section 6.1).
+--
+-- Covering-index note: section 6.1's ideal form adds
+-- INCLUDE (sender, subject, preview, otp, created_at) after the key
+-- columns to make the preview query index-only. That clause is omitted
+-- here because the SQLite builds in this project's local/CI
+-- verification environment reject INCLUDE syntax outright; the plain
+-- composite index is the portable form with identical filter/sort
+-- plans. On a D1 build confirmed to accept INCLUDE, this index can be
+-- dropped and recreated in the INCLUDE form under the same name as a
+-- pure optimisation -- see db/schema-v2.sql for the full note.
+--
+-- IF NOT EXISTS makes this statement safe to re-run.
+CREATE INDEX IF NOT EXISTS idx_mails_address_id
+  ON mails(address, id DESC);
+
+-- ----------------------------------------------------------------------------
+-- Change 4: idx_mails_created_id -- index for the cron expiry scan
+-- ----------------------------------------------------------------------------
+-- The hourly cleanup deletes expired mail by created_at. v1 indexed
+-- that with idx_mails_created(created_at). Adding id as a tiebreaker
+-- column gives a stable order within the same second and supports the
+-- bounded-chunk deletes of section 6.3 (DELETE ... WHERE created_at < ?
+-- LIMIT 1000, repeated). IF NOT EXISTS makes it safe to re-run.
+CREATE INDEX IF NOT EXISTS idx_mails_created_id ON mails(created_at, id);
+
+-- ----------------------------------------------------------------------------
+-- What is NOT changed, deliberately:
+--   * idx_addresses_token and idx_addresses_address are kept as they are.
+--     Token -> address is already an optimal point lookup (section 6.1),
+--     and v1's idx_addresses_address, though redundant with the UNIQUE
+--     constraint on addresses.address, is harmless and kept so migrated
+--     and fresh databases match (see db/schema-v2.sql).
+--   * No table is recreated and no column is dropped or renamed, so the
+--     v1 Worker keeps working against this schema (section 7.5).
+-- ----------------------------------------------------------------------------
+
+-- ----------------------------------------------------------------------------
+-- Dropping the old v1 indexes: MANUAL / OPTIONAL -- not done by this file
+-- ----------------------------------------------------------------------------
+-- Once idx_mails_address_id and idx_mails_created_id exist, the v1
+-- indexes are fully subsumed:
+--     idx_mails_address (address)     -> covered by idx_mails_address_id
+--     idx_mails_created (created_at)  -> covered by idx_mails_created_id
+-- Keeping them costs a little storage and a little write overhead on
+-- every ingest, but it does NOT cost read correctness or read speed --
+-- the query planner will simply prefer the new composite indexes.
+--
+-- They are therefore NOT dropped automatically here:
+--   1. Rollback safety: while a v1 Worker might still be rolled back to
+--      (section 7.5), leaving its preferred indexes in place keeps the
+--      old code on its old, known query plans.
+--   2. Verification first: a drop should only happen after the new plans
+--      have been confirmed in production with EXPLAIN QUERY PLAN showing
+--      "SEARCH mails USING INDEX idx_mails_address_id" and no
+--      "USE TEMP B-TREE FOR ORDER BY" for the list/delta/wait queries.
+--   3. It is a one-way, operator-timed tidy-up, not a schema requirement.
+--
+-- When an operator decides the v2 plans are proven and no v1 rollback is
+-- still plausible, run these two statements by hand (IF EXISTS keeps
+-- even this safe to repeat):
+--
+-- DROP INDEX IF EXISTS idx_mails_address;
+-- DROP INDEX IF EXISTS idx_mails_created;
+-- ----------------------------------------------------------------------------
+
+-- ----------------------------------------------------------------------------
+-- Backfill: NONE in this migration -- pre-v2 rows are handled at read time
+-- ----------------------------------------------------------------------------
+-- Existing rows keep preview = NULL and otp = NULL. There is no mass
+-- UPDATE here, by design (section 6.3):
+--   * A mass backfill would rewrite the whole mails table inside the
+--     deploy step, for data that expires within 24 hours anyway -- most
+--     pre-v2 rows delete themselves via the TTL before ever being read
+--     again.
+--   * otp cannot be honestly backfilled in pure SQL anyway: extraction
+--     is a regex over subject+text that belongs in the parser code, not
+--     in a migration.
+--
+-- Instead, every v2 read of the preview MUST tolerate NULL by falling
+-- back to the body, exactly as:
+--     COALESCE(preview, substr(text_body, 1, 200)) AS preview
+-- and MUST treat otp = NULL on a pre-v2 row as "unknown", falling back
+-- to the stored otp column being absent -- clients scan subject/body
+-- only in that case. New rows written by the v2 ingest path always
+-- populate preview (and otp when a code is found), so the NULL
+-- population drains to zero within one TTL window (24h) of migration.
+--
+-- If an operator ever wants a preview-only backfill for long-lived test
+-- data, the safe form is a bounded, repeatable statement run manually
+-- in chunks -- never inside this migration, and never for otp:
+--
+-- UPDATE mails SET preview = substr(text_body, 1, 200)
+-- WHERE preview IS NULL AND id IN
+--   (SELECT id FROM mails WHERE preview IS NULL LIMIT 1000);
+-- ============================================================================

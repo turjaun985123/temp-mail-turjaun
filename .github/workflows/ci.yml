@@ -1,0 +1,116 @@
+name: CI
+
+# Fast, hermetic checks for every pull request and every push.
+# No secrets, no network calls to production, no deploy:
+#   1. wrangler.toml exists and carries the expected Worker / D1 wiring
+#   2. node --check passes for every JavaScript / ESM file in the repo
+#   3. a unit smoke test exercises the Worker's pure helpers
+#      (parseRaw / extractOTP / extractLinks in src/worker-v2.js)
+# Live API tests (tests/api.test.mjs) are deliberately NOT run here:
+# they hit the production service. They run after deploy (deploy.yml)
+# and manually against a base URL, per docs/ARCHITECTURE.md section 7.4.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Validate, syntax-check and unit smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate wrangler.toml exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f wrangler.toml ]; then
+            echo "::error file=wrangler.toml::wrangler.toml is missing at the repository root - the Worker cannot be deployed without it."
+            exit 1
+          fi
+          echo "Found wrangler.toml:"
+          cat wrangler.toml
+          # The deploy depends on these entries; fail early if one is lost.
+          grep -q '^name = "temp-mail"' wrangler.toml \
+            || { echo "::error file=wrangler.toml::expected Worker name \"temp-mail\""; exit 1; }
+          grep -q '^main = ' wrangler.toml \
+            || { echo "::error file=wrangler.toml::expected a main = entrypoint"; exit 1; }
+          grep -q 'binding = "DB"' wrangler.toml \
+            || { echo "::error file=wrangler.toml::expected a D1 binding named DB"; exit 1; }
+          main_entry="$(sed -n 's/^main = "\(.*\)"/\1/p' wrangler.toml | head -n 1)"
+          if [ -n "$main_entry" ] && [ ! -f "$main_entry" ]; then
+            echo "::error file=wrangler.toml::main entrypoint '$main_entry' does not exist in the repo"
+            exit 1
+          fi
+          echo "wrangler.toml OK (Worker name, main entrypoint and DB binding present)."
+
+      - name: node --check all JavaScript files
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked=0
+          # .js and .mjs under the source, UI, package and test trees.
+          while IFS= read -r -d '' file; do
+            echo "node --check $file"
+            node --check "$file"
+            checked=$((checked + 1))
+          done < <(find src ui packages tests -type f \( -name '*.js' -o -name '*.mjs' \) -print0 2>/dev/null | sort -z)
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::no JavaScript files were found to check"
+            exit 1
+          fi
+          echo "Syntax OK for $checked JavaScript file(s)."
+
+      - name: Unit smoke test (Worker helpers, no network, no D1)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Written inside the repo so the relative import resolves,
+          # and removed again whatever the test outcome is.
+          smoke_file="./.unit-smoke.tmp.mjs"
+          trap 'rm -f "$smoke_file"' EXIT
+          cat > "$smoke_file" <<'EOF'
+          import assert from "node:assert/strict";
+          import { parseRaw, extractOTP, extractLinks, extractVerificationLinks } from "./src/worker-v2.js";
+
+          const raw = [
+            "From: Sender <sender@example.com>",
+            "Subject: Your code is 123456",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "Hello, your verification code is 123456.",
+            "Confirm here: https://example.com/verify?token=abc123",
+          ].join("\r\n");
+
+          const parsed = parseRaw(raw);
+          assert.equal(parsed.subject, "Your code is 123456");
+          assert.ok(parsed.text.includes("123456"), "parsed text should keep the body");
+          assert.equal(parsed.from, "Sender <sender@example.com>");
+
+          assert.equal(extractOTP("Your verification code is 654321"), "654321");
+          assert.equal(extractOTP("no digits at all"), null);
+
+          const links = extractLinks("Confirm: https://example.com/verify?token=abc123", "");
+          assert.ok(links.includes("https://example.com/verify?token=abc123"));
+          assert.ok(extractVerificationLinks("https://example.com/verify?token=abc123", "").length >= 1);
+
+          console.log("unit smoke OK");
+          EOF
+          node "$smoke_file"

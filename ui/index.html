@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Fast disposable temp mail for turjaun.xyz — create an inbox in one click, receive mail instantly, copy OTP codes.">
+<meta name="color-scheme" content="dark">
+<title>Temp Mail — turjaun.xyz</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+/* Critical inline CSS — page is fully usable standalone even if styles.css fails to load.
+   styles.css (owned separately) layers the full design system on top of these basics. */
+:root{--bg:#0b1220;--surface:#111a2e;--surface2:#16223c;--border:#24304d;--text:#e6edf7;--muted:#8b9bb4;--accent:#3b82f6;--accent2:#2563eb;--ok:#22c55e;--warn:#f59e0b;--danger:#ef4444;--radius:14px}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+button,input,select{font:inherit;color:var(--text)}
+button{cursor:pointer;border:1px solid var(--border);background:var(--surface2);border-radius:10px;padding:.6rem 1rem;min-height:44px}
+button:hover{border-color:var(--accent)}
+button.primary,button#createBtn{background:var(--accent2);border-color:var(--accent2);color:#fff;font-weight:600}
+button:disabled{opacity:.55;cursor:wait}
+input,select{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.6rem .8rem;min-height:44px;width:100%}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app-header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.8rem 1rem;background:rgba(11,18,32,.92);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:.6rem;font-weight:700;font-size:1.15rem}
+.brand .logo{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;background:var(--accent2);color:#fff}
+.domain-badge{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .65rem;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.85rem;font-weight:600}
+.domain-badge::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok)}
+#status{display:inline-flex;align-items:center;gap:.45rem;margin-left:auto;color:var(--muted);font-size:.88rem}
+#status .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+#status[data-state="live"] .dot{background:var(--ok)}
+#status[data-state="polling"] .dot{background:var(--warn)}
+#status[data-state="error"] .dot{background:var(--danger)}
+main.layout{max-width:1100px;margin:0 auto;padding:1rem;display:grid;gap:1rem;grid-template-columns:1fr}
+@media(min-width:900px){main.layout{grid-template-columns:380px 1fr;align-items:start}.pane-detail{grid-column:2}.pane-inbox{grid-row:span 2}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem}
+.card h2,.card h3{margin:.1rem 0 .7rem;font-size:1rem}
+.muted{color:var(--muted)} .small{font-size:.85rem}
+.create-row{display:flex;gap:.5rem;flex-wrap:wrap}
+.create-row .grow{flex:1 1 140px}
+.addr-row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.9rem;padding:.7rem .8rem;background:var(--surface2);border:1px dashed var(--border);border-radius:10px}
+#addr{font-weight:700;word-break:break-all;flex:1 1 180px}
+.token-row{margin-top:.5rem;word-break:break-all}
+#token{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;color:var(--muted)}
+.inbox-tools{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem}
+.inbox-tools .grow{flex:1 1 160px}
+#inbox{display:flex;flex-direction:column}
+#inbox .mail,#inbox article{padding:.75rem .5rem;border-top:1px solid var(--border);cursor:pointer;border-radius:8px}
+#inbox .mail:hover,#inbox article:hover{background:var(--surface2)}
+#inbox .empty{padding:1.2rem .5rem;color:var(--muted);text-align:center}
+#view{white-space:pre-wrap;word-break:break-word;margin:0;font-family:inherit}
+.otp-box{display:none;margin:0 0 1rem;padding:1rem;text-align:center;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius)}
+.otp-box.visible{display:block}
+.otp-label{color:var(--muted);font-size:.8rem;letter-spacing:.12em;text-transform:uppercase}
+#otpCode,.otp-code{display:block;font-size:2.4rem;font-weight:800;letter-spacing:.35em;margin:.35rem 0 .6rem;font-variant-numeric:tabular-nums}
+#toastArea,.toast-area{position:fixed;right:1rem;bottom:1rem;z-index:50;display:flex;flex-direction:column;gap:.5rem;max-width:min(92vw,360px)}
+.toast{background:var(--surface2);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px;padding:.7rem .9rem;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.toast.success{border-left-color:var(--ok)} .toast.error{border-left-color:var(--danger)}
+.app-footer{max-width:1100px;margin:0 auto;padding:0 1rem 2rem;color:var(--muted);font-size:.85rem}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+
+<!-- ================= Header ================= -->
+<header class="app-header">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
+    </span>
+    <span>Temp Mail</span>
+  </div>
+  <span class="domain-badge" id="domainBadge" title="Mail domain served by this inbox">turjaun.xyz</span>
+  <!-- Auto-refresh status: app.js sets data-state to live | polling | paused | error and updates the text -->
+  <div id="status" class="status" data-state="idle" role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="statusText">Not started</span>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ================= Create inbox ================= -->
+  <section class="card pane-create" aria-labelledby="createHeading">
+    <h2 id="createHeading">Your inbox</h2>
+
+    <label class="sr-only" for="name">Custom inbox name (optional)</label>
+    <div class="create-row">
+      <input id="name" class="grow" type="text" inputmode="text" autocomplete="off" spellcheck="false"
+             placeholder="custom name (optional)" maxlength="64">
+      <label class="sr-only" for="domain">Domain</label>
+      <select id="domain" aria-label="Domain">
+        <option value="turjaun.xyz" selected>turjaun.xyz</option>
+      </select>
+    </div>
+    <div class="create-row" style="margin-top:.6rem">
+      <button id="createBtn" class="primary" type="button">Create inbox</button>
+      <button id="randomBtn" type="button">Random inbox</button>
+    </div>
+
+    <div class="addr-row">
+      <span class="muted small" id="addrLabel">Address</span>
+      <!-- app.js contract (v1): POST /api/new_address -> {address, token} -->
+      <span id="addr" aria-labelledby="addrLabel">—</span>
+      <button id="copyAddr" type="button" disabled aria-label="Copy email address">Copy</button>
+    </div>
+    <p class="token-row small">
+      <span class="muted">Token:</span>
+      <!-- app.js uses this token as: Authorization: Bearer &lt;token&gt; on GET /api/mails -->
+      <span id="token">—</span>
+    </p>
+    <p class="muted small">Mails are kept for 24 hours, then deleted automatically. Anyone who can guess this address can read its mail — use a random name for anything sensitive.</p>
+  </section>
+
+  <!-- ================= Inbox list ================= -->
+  <section class="card pane-inbox" aria-labelledby="inboxHeading">
+    <h2 id="inboxHeading">Inbox</h2>
+    <div class="inbox-tools">
+      <label class="sr-only" for="search">Filter messages</label>
+      <input id="search" class="grow" type="search" autocomplete="off" placeholder="Filter by sender or subject…">
+      <button id="refreshBtn" type="button" aria-label="Refresh inbox">Refresh</button>
+    </div>
+    <!-- app.js renders one .mail / <article> per message here (GET /api/mails, Bearer token).
+         Each item should carry data-id so clicks can load GET /api/mail/:id into #view. -->
+    <div id="inbox" role="list" aria-label="Messages">
+      <div class="empty">Create an inbox first — then send mail to it and it will appear here.</div>
+    </div>
+  </section>
+
+  <!-- ================= Message detail ================= -->
+  <section class="card pane-detail" aria-labelledby="viewHeading">
+    <h2 id="viewHeading">Message</h2>
+
+    <!-- OTP: app.js shows .otp-box (adds .visible) and fills #otpCode when a code is detected in the open message -->
+    <div class="otp-box" id="otpBox">
+      <span class="otp-label">Verification code</span>
+      <span class="otp-code" id="otpCode">——————</span>
+      <button id="copyOtp" type="button">Copy code</button>
+    </div>
+
+    <!-- app.js contract (v1): GET /api/mail/:id -> fills this pane (subject, sender, time, body) -->
+    <div id="view" aria-live="polite">Select a message from your inbox to read it here.</div>
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  <p>Temp Mail for <strong>turjaun.xyz</strong> · Disposable inboxes — do not use for important accounts · Mail auto-deletes after 24 hours</p>
+</footer>
+
+<!-- Toasts: app.js appends .toast elements here (success / error / info) -->
+<div id="toastArea" class="toast-area" aria-live="polite" aria-atomic="false"></div>
+
+<script src="app.js" defer></script>
+</body>
+</html>

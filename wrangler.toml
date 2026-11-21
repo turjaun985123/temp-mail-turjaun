@@ -1,0 +1,40 @@
+# Temp Mail v2 — Cloudflare Worker configuration
+# Live service: https://temp-mail.turjaun.workers.dev (account subdomain: turjaun.workers.dev)
+# Domain: turjaun.xyz — see AGENTS.md for how agents use the deployed API.
+
+name = "temp-mail"
+main = "src/worker-final.js"
+compatibility_date = "2024-12-01"
+
+# ---------------------------------------------------------------------------
+# Secrets — NEVER put secret values in this file and never commit them.
+# Set each secret once per environment with Wrangler, e.g.:
+#
+#   npx wrangler secret put JWT_SECRET
+#   npx wrangler secret put ADMIN_PASSWORD
+#
+# (You will be prompted to paste the value; it is stored encrypted by
+# Cloudflare and exposed to the Worker as env.JWT_SECRET / env.ADMIN_PASSWORD.)
+# For local development, put the same names in a `.dev.vars` file instead —
+# `.dev.vars` is git-ignored and must never be committed.
+# ---------------------------------------------------------------------------
+
+[vars]
+# Comma-separated list of domains this service accepts mail for.
+DOMAINS = "turjaun.xyz"
+# How long (hours) an inbox and its mail are kept before cleanup deletes them.
+MAIL_TTL_HOURS = "24"
+
+# --- D1 Database -----------------------------------------------------------
+# Live database: temp-mail-db
+# Apply the v2 schema with: npm run db:init   (db/schema-v2.sql)
+[[d1_databases]]
+binding = "DB"
+database_name = "temp-mail-db"
+database_id = "324a85a1-e2a8-417e-883b-4b23e060fbce"
+
+# --- Cron Triggers ---------------------------------------------------------
+# Hourly cleanup: the Worker's `scheduled` handler deletes expired
+# addresses and mail older than MAIL_TTL_HOURS.
+[triggers]
+crons = ["0 * * * *"]

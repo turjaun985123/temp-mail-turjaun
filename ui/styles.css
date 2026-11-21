@@ -1,0 +1,335 @@
+/* Temp Mail v2 — turjaun.xyz
+   Modern dark UI (light via prefers-color-scheme). No external fonts.
+   Names cover v1 (header,.card,.mail,#inbox,#view,#name,#domain,#addr,#token)
+   and conventional v2 (.layout,.panes,.otp,#status,.toast,.skeleton). */
+
+:root{
+  color-scheme:dark;
+  --bg:#0b1220; --bg-2:#0f172a;
+  --surface:#1e293b; --surface-2:#162032; --surface-hover:#243449;
+  --border:#334155; --border-strong:#475569;
+  --text:#e2e8f0; --text-strong:#f8fafc; --muted:#94a3b8; --faint:#64748b;
+  --accent:#2563eb; --accent-hover:#1d4ed8; --accent-active:#1e40af; --accent-text:#fff;
+  --accent-soft:rgba(37,99,235,.16);
+  --ok:#22c55e; --ok-soft:rgba(34,197,94,.14);
+  --danger:#f87171; --danger-soft:rgba(248,113,113,.12);
+  --otp-bg:#0b1220;
+  --shadow:0 10px 30px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.25);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.3);
+  --radius:12px; --radius-sm:8px; --radius-lg:16px;
+  --gap:16px;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --focus:#60a5fa;
+  --skeleton-1:#1e293b; --skeleton-2:#2b3c55;
+  --toast-bg:#f8fafc; --toast-text:#0f172a;
+}
+@media (prefers-color-scheme:light){
+  :root{
+    color-scheme:light;
+    --bg:#f1f5f9; --bg-2:#e8eef6;
+    --surface:#fff; --surface-2:#f8fafc; --surface-hover:#eef4fb;
+    --border:#cbd5e1; --border-strong:#94a3b8;
+    --text:#1e293b; --text-strong:#0f172a; --muted:#64748b; --faint:#94a3b8;
+    --accent-soft:rgba(37,99,235,.1);
+    --ok-soft:rgba(34,197,94,.12);
+    --otp-bg:#f8fafc;
+    --shadow:0 10px 30px rgba(15,23,42,.12),0 2px 8px rgba(15,23,42,.08);
+    --shadow-sm:0 1px 3px rgba(15,23,42,.12);
+    --focus:#2563eb;
+    --skeleton-1:#e2e8f0; --skeleton-2:#f1f5f9;
+    --toast-bg:#0f172a; --toast-text:#f8fafc;
+  }
+}
+
+/* ---------- Base / layout ---------- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; font-family:var(--font); line-height:1.55;
+  background:linear-gradient(180deg,var(--bg-2),var(--bg) 240px) var(--bg);
+  color:var(--text); min-height:100vh;
+}
+.container,.wrap,main{
+  max-width:1080px; margin:0 auto; padding:32px 16px 56px; width:100%;
+}
+h1,h2,h3{color:var(--text-strong); line-height:1.25; margin:0 0 8px}
+h1{font-size:clamp(1.5rem,3vw,2rem); letter-spacing:-.02em}
+h2{font-size:1.2rem} h3{font-size:1rem}
+p{margin:0 0 10px}
+a{color:var(--focus); text-underline-offset:2px}
+small,.muted{color:var(--muted)} .faint{color:var(--faint)}
+.mono,code,kbd{font-family:var(--mono)}
+::selection{background:var(--accent); color:var(--accent-text)}
+
+/* Header */
+header,.header,.app-header{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  margin-bottom:20px;
+}
+header h1,.header h1{margin:0; flex:1 1 auto; min-width:0}
+.tagline,.subtitle{color:var(--muted); width:100%; margin-top:-4px}
+.logo,.brand-mark{font-size:1.6rem; line-height:1}
+
+/* Two-pane: inbox list + message detail */
+.layout,.panes,.main-grid{
+  display:grid; gap:var(--gap); align-items:start;
+  grid-template-columns:minmax(320px,5fr) minmax(0,7fr);
+}
+.pane,.pane-inbox,.pane-detail{min-width:0}
+.controls,.toolbar,.actions,.row{
+  display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+}
+.controls>*{min-width:0}
+.spacer{flex:1 1 auto}
+.stack{display:grid; gap:var(--gap)}
+
+/* ---------- Cards ---------- */
+.card{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:16px; margin:0 0 var(--gap);
+  box-shadow:var(--shadow-sm);
+}
+.card>h2,.card>h3{margin-bottom:12px}
+.card-header{
+  display:flex; align-items:center; gap:10px; margin-bottom:12px;
+}
+.card-header h2,.card-header h3{margin:0; flex:1 1 auto}
+
+/* ---------- Forms / buttons ---------- */
+input,select,textarea,button{
+  font:inherit; padding:10px 12px; border-radius:var(--radius-sm);
+  border:1px solid var(--border); background:var(--surface-2); color:var(--text);
+  min-height:42px;
+}
+input,select,textarea{accent-color:var(--accent)}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+input:hover,select:hover,textarea:hover{border-color:var(--border-strong)}
+input:disabled,select:disabled,button:disabled{opacity:.55; cursor:not-allowed}
+#name{flex:1 1 180px}
+#domain{flex:0 1 auto}
+label{font-weight:600; color:var(--text-strong); display:inline-block; margin-bottom:6px}
+.field{display:grid; gap:6px; margin-bottom:12px}
+
+button,.btn{
+  background:var(--surface); color:var(--text); border:1px solid var(--border);
+  cursor:pointer; font-weight:600; white-space:nowrap;
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  transition:background .15s ease,border-color .15s ease,transform .05s ease;
+}
+button:hover,.btn:hover{background:var(--surface-hover); border-color:var(--border-strong)}
+button:active,.btn:active{transform:translateY(1px)}
+button.primary,.btn-primary,.primary{
+  background:var(--accent); border-color:transparent; color:var(--accent-text);
+}
+button.primary:hover,.btn-primary:hover,.primary:hover{background:var(--accent-hover)}
+button.primary:active,.btn-primary:active,.primary:active{background:var(--accent-active)}
+.btn-danger,.danger{color:var(--danger)}
+.btn-ghost,.ghost{background:transparent; border-color:transparent}
+.btn-ghost:hover,.ghost:hover{background:var(--surface-hover)}
+.btn-sm,button.small{padding:6px 10px; min-height:34px; font-size:.9rem}
+.btn-block{width:100%}
+
+/* Address / token display */
+#addr,.address-value{
+  color:var(--text-strong); font-family:var(--mono); font-size:1.02rem;
+  overflow-wrap:anywhere; user-select:all;
+}
+.address-row{
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  background:var(--surface-2); border:1px solid var(--border);
+  border-radius:var(--radius-sm); padding:10px 12px; margin:10px 0;
+}
+.address-row #addr{flex:1 1 auto}
+#token,.token-value{
+  font-family:var(--mono); font-size:.82rem; color:var(--muted);
+  overflow-wrap:anywhere; user-select:all;
+}
+
+/* ---------- Status ---------- */
+#status,.status{
+  display:inline-flex; align-items:center; gap:8px;
+  font-size:.9rem; color:var(--muted);
+}
+.status-dot,.dot{
+  width:10px; height:10px; border-radius:50%; flex:0 0 auto;
+  background:var(--faint); position:relative;
+}
+.status-dot.live,.status-dot.waiting,.dot.live,
+#status.live .status-dot,#status.waiting .status-dot{
+  background:var(--ok);
+}
+.status-dot.live::after,.status-dot.waiting::after,.dot.live::after,
+#status.live .status-dot::after,#status.waiting .status-dot::after{
+  content:""; position:absolute; inset:-4px; border-radius:50%;
+  border:2px solid var(--ok); opacity:.6;
+  animation:pulse 1.8s ease-out infinite;
+}
+.status-dot.paused,.dot.paused,#status.paused .status-dot{background:var(--faint)}
+.status-dot.error,.dot.error,#status.error .status-dot{background:var(--danger)}
+@keyframes pulse{
+  0%{transform:scale(.6); opacity:.7}
+  70%,100%{transform:scale(1.25); opacity:0}
+}
+.badge,.pill{
+  display:inline-flex; align-items:center; gap:6px; padding:2px 9px;
+  border-radius:999px; font-size:.78rem; font-weight:700;
+  background:var(--accent-soft); color:var(--focus);
+}
+.badge.ok{background:var(--ok-soft); color:var(--ok)}
+.count{color:var(--muted); font-weight:600}
+
+/* ---------- Inbox / mail list ---------- */
+#inbox,.mail-list{list-style:none; margin:0; padding:0}
+.empty,.empty-state{
+  color:var(--muted); text-align:center; padding:28px 12px;
+  border:1px dashed var(--border); border-radius:var(--radius-sm);
+}
+.mail{
+  display:block; width:100%; text-align:left;
+  padding:12px 10px; margin:0; min-height:0;
+  background:transparent; border:0; border-top:1px solid var(--border);
+  border-radius:0; color:var(--text); cursor:pointer; font-weight:400;
+  transition:background .12s ease;
+}
+li.mail,div.mail{border-top:1px solid var(--border)}
+.mail:first-child{border-top:0}
+.mail:hover{background:var(--surface-hover)}
+.mail.selected,.mail.active{background:var(--accent-soft)}
+.mail.unread{font-weight:600}
+.mail.unread .mail-subject,.mail.unread b{color:var(--text-strong)}
+.mail.unread::before,.unread-dot{
+  content:""; display:inline-block; width:8px; height:8px; border-radius:50%;
+  background:var(--accent); margin-right:8px; vertical-align:middle; flex:0 0 auto;
+}
+.mail-subject,.mail b{
+  color:var(--text-strong); display:block;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.mail-meta,.mail small{
+  color:var(--muted); font-size:.84rem;
+  display:flex; gap:6px; flex-wrap:wrap; justify-content:space-between;
+}
+.mail-sender{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%}
+.mail-time{white-space:nowrap; flex:0 0 auto}
+.mail-preview,.preview{
+  color:var(--muted); font-size:.9rem; font-weight:400;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+
+/* ---------- Message detail ---------- */
+#view,.message-body,.mail-body{
+  white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere;
+  font-family:var(--font); font-size:.96rem; margin:0;
+  background:var(--surface-2); border:1px solid var(--border);
+  border-radius:var(--radius-sm); padding:14px; min-height:120px;
+}
+#view:empty::before{content:"Select a message to read it"; color:var(--faint)}
+.message-header{border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:12px}
+.message-header h2,.message-subject{overflow-wrap:anywhere}
+.message-meta{color:var(--muted); font-size:.9rem; display:grid; gap:2px}
+.message-frame,.html-frame{width:100%; border:1px solid var(--border); border-radius:var(--radius-sm); background:#fff; min-height:300px}
+pre#view{font-family:var(--font)}
+
+/* ---------- OTP ---------- */
+.otp,.otp-code,#otp{
+  display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap;
+  font-family:var(--mono); font-size:2rem; font-weight:800; letter-spacing:.35em;
+  text-indent:.35em; /* optically re-centre letter-spaced digits */
+  color:var(--text-strong); background:var(--otp-bg);
+  border:2px dashed var(--border-strong); border-radius:var(--radius);
+  padding:16px 12px; margin:12px 0; user-select:all; cursor:copy;
+  text-align:center; overflow-wrap:anywhere;
+}
+.otp-label{
+  display:block; text-align:center; font-size:.78rem; font-weight:700;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:4px;
+}
+.otp small{letter-spacing:normal; text-indent:0; font-size:.85rem}
+
+/* ---------- Toast ---------- */
+.toast,#toast{
+  position:fixed; left:50%; bottom:24px; transform:translate(-50%,16px);
+  z-index:1000; max-width:min(92vw,480px);
+  background:var(--toast-bg); color:var(--toast-text);
+  padding:12px 18px; border-radius:999px; box-shadow:var(--shadow);
+  font-weight:600; font-size:.95rem; text-align:center;
+  opacity:0; pointer-events:none;
+  transition:opacity .2s ease,transform .2s ease;
+}
+.toast.show,#toast.show,.toast.visible{opacity:1; transform:translate(-50%,0); pointer-events:auto}
+.toast.error{background:var(--danger); color:#fff}
+.toast.success{background:var(--ok); color:#052e12}
+#toasts,.toast-container{position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:1000; display:grid; gap:8px; justify-items:center}
+#toasts .toast,.toast-container .toast{position:static; transform:none; opacity:1; pointer-events:auto}
+
+/* ---------- Skeleton loading ---------- */
+.skeleton{
+  border-radius:var(--radius-sm); min-height:14px;
+  background:linear-gradient(100deg,var(--skeleton-1) 40%,var(--skeleton-2) 50%,var(--skeleton-1) 60%);
+  background-size:200% 100%; animation:shimmer 1.4s linear infinite;
+}
+.skeleton-mail{padding:12px 10px; border-top:1px solid var(--border); display:grid; gap:8px}
+.skeleton-mail:first-child{border-top:0}
+.skeleton-line{height:14px}
+.skeleton-line.short{width:45%} .skeleton-line.mid{width:70%} .skeleton-line.long{width:92%}
+.skeleton-title{height:20px; width:55%}
+.skeleton-otp{height:64px; border-radius:var(--radius)}
+.loading{opacity:.75; pointer-events:none}
+.spinner{
+  width:16px; height:16px; border-radius:50%; flex:0 0 auto;
+  border:2px solid var(--border); border-top-color:var(--accent);
+  animation:spin .7s linear infinite; display:inline-block;
+}
+@keyframes shimmer{to{background-position:-200% 0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- Misc ---------- */
+.error,.alert-error{
+  background:var(--danger-soft); color:var(--danger);
+  border:1px solid var(--danger); border-radius:var(--radius-sm); padding:10px 12px;
+}
+.notice{background:var(--accent-soft); border-radius:var(--radius-sm); padding:10px 12px}
+hr{border:0; border-top:1px solid var(--border); margin:16px 0}
+footer,.footer{color:var(--faint); font-size:.88rem; text-align:center; margin-top:28px}
+[hidden]{display:none!important}
+.sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+
+/* ---------- Focus ---------- */
+:focus{outline:none}
+:focus-visible,
+a:focus-visible,button:focus-visible,.btn:focus-visible,
+input:focus-visible,select:focus-visible,textarea:focus-visible,
+.mail:focus-visible,.otp:focus-visible{
+  outline:3px solid var(--focus); outline-offset:2px;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--focus)}
+
+/* ---------- Responsive ---------- */
+@media (max-width:720px){
+  .container,.wrap,main{padding:20px 12px 40px}
+  .layout,.panes,.main-grid{grid-template-columns:1fr}
+  .card{padding:14px}
+  header,.header,.app-header{margin-bottom:14px}
+  .controls,.toolbar,.actions{width:100%}
+  .controls>input,.controls>select,.controls>button,
+  .toolbar>button,.actions>button{flex:1 1 auto}
+  #name{flex:1 1 100%}
+  #domain{flex:1 1 auto}
+  .otp,.otp-code,#otp{font-size:1.55rem; letter-spacing:.22em; text-indent:.22em; padding:13px 8px}
+  .mail-meta,.mail small{justify-content:flex-start}
+  .mail-sender{max-width:100%}
+  .toast,#toast{bottom:14px}
+  #view,.message-body{min-height:80px}
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms!important; animation-iteration-count:1!important;
+    transition-duration:.01ms!important; scroll-behavior:auto!important;
+  }
+  .status-dot.live::after,.status-dot.waiting::after,.dot.live::after{animation:none; opacity:0}
+  .skeleton{animation:none}
+  .spinner{animation:none}
+}

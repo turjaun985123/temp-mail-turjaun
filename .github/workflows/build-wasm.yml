@@ -1,0 +1,84 @@
+name: Build WASM (Rust mail parser)
+
+# Builds the Rust MIME parser (rust/mail-parser) to WebAssembly and
+# uploads the wasm-pack package as an artifact for deploy.yml / local
+# consumers. GitHub Actions is the ONLY place Rust is compiled for
+# this project - there is no local rustc requirement (see
+# docs/ARCHITECTURE.md sections 4.5 and 7.2).
+
+on:
+  push:
+    paths:
+      - "rust/**"
+      - ".github/workflows/build-wasm.yml"
+  pull_request:
+    paths:
+      - "rust/**"
+      - ".github/workflows/build-wasm.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-wasm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-wasm:
+    name: cargo test + wasm-pack build (web target)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain (stable, wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo registry and Rust build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/mail-parser/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/mail-parser/Cargo.toml', 'rust/mail-parser/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+
+      - name: Show tool versions
+        run: |
+          rustc --version
+          cargo --version
+          wasm-pack --version
+
+      - name: Build the WASM package (web target)
+        run: wasm-pack build rust/mail-parser --target web --release
+
+      - name: Run the Rust test suite
+        working-directory: rust/mail-parser
+        run: cargo test --verbose
+
+      - name: Verify the package was produced
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la rust/mail-parser/pkg
+          test -n "$(find rust/mail-parser/pkg -name '*.wasm' -print -quit)" \
+            || { echo "::error::wasm-pack produced no .wasm file in rust/mail-parser/pkg"; exit 1; }
+
+      - name: Upload the WASM package as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mail-parser-wasm
+          path: rust/mail-parser/pkg
+          if-no-files-found: error
+          retention-days: 14

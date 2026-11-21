@@ -1,0 +1,119 @@
+name: Deploy
+
+# Deploys the temp-mail Worker to production:
+#   https://temp-mail.turjaun.workers.dev
+#
+# GitHub Actions is the only deploy path for v2 (no dashboard paste,
+# no wrangler deploy from a workstation - docs/ARCHITECTURE.md 7.1).
+#
+# Required repository secrets (never commit these):
+#   CLOUDFLARE_API_TOKEN   scoped token: Workers Scripts Edit, D1 Edit,
+#                          Workers Routes Edit, Email Routing Rules
+#                          Edit, Zone Read
+#   CLOUDFLARE_ACCOUNT_ID  the Cloudflare account that owns the Worker
+#
+# The live API tests in tests/api.test.mjs run against production, so
+# they are not a pre-deploy gate here. Instead this workflow deploys
+# and then smoke-tests the live /api/health and /api/config endpoints
+# with retries (below). Run the full API suite manually after a deploy:
+#   TEMP_MAIL_BASE=https://temp-mail.turjaun.workers.dev npm test
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two production deploys at the same time, and never cancel
+# one that is already in flight.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Worker and smoke test production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate wrangler.toml exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f wrangler.toml \
+            || { echo "::error file=wrangler.toml::wrangler.toml is missing - cannot deploy"; exit 1; }
+          echo "wrangler.toml found."
+
+      - name: Download the WASM parser artifact (if available)
+        id: wasm-artifact
+        # Artifacts belong to the build-wasm workflow run, not this one,
+        # so this needs a cross-workflow download. It is optional: the
+        # Worker ships its JS parser fallback when no pkg is present,
+        # so a missing artifact warns instead of failing the deploy.
+        uses: dawidd6/action-download-artifact@v6
+        continue-on-error: true
+        with:
+          workflow: build-wasm.yml
+          name: mail-parser-wasm
+          path: rust/mail-parser/pkg
+          if_no_artifact_found: warn
+
+      - name: Report WASM artifact status
+        shell: bash
+        run: |
+          if [ -d rust/mail-parser/pkg ] && [ -n "$(find rust/mail-parser/pkg -name '*.wasm' -print -quit 2>/dev/null)" ]; then
+            echo "WASM parser artifact present:"
+            ls -la rust/mail-parser/pkg
+          else
+            echo "::warning::No WASM parser artifact was downloaded - deploying with the JS parser fallback in src/worker-v2.js."
+          fi
+
+      - name: Deploy the Worker with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      - name: Smoke test production (/api/health and /api/config, with retry)
+        shell: bash
+        env:
+          BASE_URL: https://temp-mail.turjaun.workers.dev
+        run: |
+          set -euo pipefail
+          echo "Waiting for $BASE_URL/api/health to return {\"ok\":true} ..."
+          health=""
+          # 10 attempts, 6s apart: a fresh deploy can take a few
+          # seconds to propagate to every Cloudflare point of presence.
+          for attempt in $(seq 1 10); do
+            if health="$(curl -fsS --max-time 10 "$BASE_URL/api/health" 2>/dev/null)" \
+               && printf '%s' "$health" | grep -q '"ok":true'; then
+              echo "Health OK on attempt $attempt: $health"
+              break
+            fi
+            echo "Attempt $attempt/10 not healthy yet (response: ${health:-<none>}) - retrying in 6s ..."
+            health=""
+            sleep 6
+          done
+          if [ -z "$health" ]; then
+            echo "::error::Smoke test failed - $BASE_URL/api/health did not return {\"ok\":true} after 10 attempts."
+            echo "The deploy itself completed; check the Worker in the Cloudflare dashboard and consider rolling back to the previous deployment."
+            exit 1
+          fi
+          echo "Checking $BASE_URL/api/config ..."
+          config="$(curl -fsS --max-time 10 "$BASE_URL/api/config")"
+          echo "Config: $config"
+          printf '%s' "$config" | grep -q 'turjaun.xyz' \
+            || { echo "::error::Smoke test failed - /api/config does not list turjaun.xyz: $config"; exit 1; }
+          echo "Smoke tests passed: production is live at $BASE_URL"
